@@ -1,5 +1,11 @@
 # go-ollama
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/eslider/go-ollama.svg)](https://pkg.go.dev/github.com/eslider/go-ollama)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Go](https://img.shields.io/badge/Go-1.22+-00ADD8.svg)](https://go.dev)
+[![Latest Release](https://img.shields.io/github/v/tag/eSlider/go-ollama?sort=semver&label=release)](https://github.com/eSlider/go-ollama/releases)
+[![GitHub Stars](https://img.shields.io/github/stars/eSlider/go-ollama?style=social)](https://github.com/eSlider/go-ollama/stargazers)
+
 Go client library for the [Ollama](https://ollama.com/) / [Open WebUI](https://openwebui.com/) API with streaming support.
 
 ## Features
