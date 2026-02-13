@@ -7,11 +7,12 @@
 [![Latest Release](https://img.shields.io/github/v/tag/eSlider/go-ollama?sort=semver&label=release)](https://github.com/eSlider/go-ollama/releases)
 [![GitHub Stars](https://img.shields.io/github/stars/eSlider/go-ollama?style=social)](https://github.com/eSlider/go-ollama/stargazers)
 
-Go client library for the [Ollama](https://ollama.com/) / [Open WebUI](https://openwebui.com/) API with streaming support.
+Go client library for [Ollama](https://ollama.com/) and [Open WebUI](https://openwebui.com/) with streaming support. Works as an authenticated API client for both — connect directly to a local Ollama instance or to an Open WebUI deployment with user management, model access control, and shared conversations.
 
 ## Features
 
-- Authenticated API calls with Bearer token
+- **Dual backend** — works with both raw Ollama and Open WebUI (authenticated)
+- **Bearer token auth** — required for Open WebUI, optional for local Ollama
 - **Streaming responses** — real-time token-by-token processing via `OnJson` callback
 - **Code block extraction** — automatically parses markdown code fences from AI output via `OnCodeBlock`
 - Configurable model options (temperature, context size, GPU settings, etc.)
@@ -23,6 +24,66 @@ Go client library for the [Ollama](https://ollama.com/) / [Open WebUI](https://o
 ```bash
 go get github.com/eslider/go-ollama
 ```
+
+## Connecting to Ollama vs Open WebUI
+
+The client works with two backends through the same API — the only difference is the URL and whether a token is needed:
+
+```mermaid
+graph LR
+    subgraph "Your App"
+        CL["go-ollama Client"]
+    end
+
+    subgraph "Option A: Raw Ollama"
+        OL["Ollama<br/>:11434/api/generate"]
+        GPU["Local GPU / CPU"]
+    end
+
+    subgraph "Option B: Open WebUI"
+        OW["Open WebUI<br/>:3000/ollama/api/generate"]
+        AUTH["Auth · Users · History"]
+        OL2["Ollama Backend"]
+    end
+
+    CL -->|"no token needed"| OL
+    OL --> GPU
+
+    CL -->|"Bearer token"| OW
+    OW --> AUTH
+    AUTH --> OL2
+```
+
+### Direct Ollama (no auth)
+
+Connect to a local Ollama instance — no token required:
+
+```go
+client := ollama.NewOpenWebUiClient(&ollama.DSN{
+    URL: "http://localhost:11434/api/generate",
+    // Token is empty — Ollama doesn't require auth by default
+})
+```
+
+### Open WebUI (authenticated)
+
+Connect to [Open WebUI](https://openwebui.com/), which wraps Ollama and adds user management, conversation history, model access control, and a web chat interface. The API requires a Bearer token — generate one in **Settings → Account → API Keys**:
+
+```go
+client := ollama.NewOpenWebUiClient(&ollama.DSN{
+    URL:   "https://ai.example.com/ollama/api/generate",
+    Token: "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+})
+```
+
+Open WebUI benefits:
+- **Multi-user access** — each user gets their own API key and conversation history
+- **Model management** — admins control which models are available
+- **Usage tracking** — monitor API usage per user/team
+- **RAG pipelines** — attach documents for retrieval-augmented generation
+- **Shared prompts** — team-wide prompt library
+
+Both backends return the same NDJSON streaming format, so all `OnJson` and `OnCodeBlock` callbacks work identically regardless of which one you connect to.
 
 ## How Streaming Works
 
@@ -258,13 +319,16 @@ graph TB
         PB["ParseCodeBlock<br/>regex fence parser"]
     end
 
-    subgraph "Ollama API"
-        API["/api/generate"]
+    subgraph "Backend (either one)"
+        API1["Ollama<br/>:11434/api/generate"]
+        API2["Open WebUI<br/>:3000/ollama/api/generate<br/>(auth + users + history)"]
     end
 
     APP -->|"client.Query(Request)"| CL
-    CL -->|"POST JSON"| API
-    API -->|"NDJSON stream"| SC
+    CL -->|"POST + Bearer token"| API2
+    CL -->|"POST (no auth)"| API1
+    API1 -->|"NDJSON stream"| SC
+    API2 -->|"NDJSON stream"| SC
     SC -->|"Response{}"| ONJ
     SC -->|"accumulate text"| PB
     PB -->|"[]*CodeBlock"| OCB
@@ -272,10 +336,10 @@ graph TB
 
 ## Environment Variables
 
-| Variable | Description |
-|---|---|
-| `OPEN_WEB_API_GENERATE_URL` | Ollama/Open WebUI API endpoint (e.g. `http://localhost:11434/api/generate`) |
-| `OPEN_WEB_API_TOKEN` | Bearer token for authentication (empty for local Ollama) |
+| Variable | Description | Example |
+|---|---|---|
+| `OPEN_WEB_API_GENERATE_URL` | API endpoint URL | `http://localhost:11434/api/generate` (Ollama) or `https://ai.example.com/ollama/api/generate` (Open WebUI) |
+| `OPEN_WEB_API_TOKEN` | Bearer token | Empty for local Ollama, required for Open WebUI (`sk-...`) |
 
 ## Testing
 
