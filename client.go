@@ -74,6 +74,7 @@ const (
 type Request struct {
 	Model       string                   `json:"model"`
 	Prompt      string                   `json:"prompt"`               // See: https://github.com/ollama/ollama/blob/main/docs/api.md#generate-a-completion
+	System      *string                  `json:"system,omitempty"`     // (optional) system message to override the model's default system prompt
 	Format      *RequestFormat           `json:"format,omitempty"`     // By default is text, but can be json
 	Options     *RequestOptions          `json:"options,omitempty"`    // (optional) the options to use for the model
 	Suffix      *string                  `json:"suffix,omitempty"`     //  the text after the model response
@@ -127,6 +128,66 @@ func NewOpenWebUiClient(dsn *DSN) *Client {
 		},
 		ds: dsn,
 	}
+}
+
+// ProcessModelDetails holds model format metadata from the ps endpoint.
+type ProcessModelDetails struct {
+	ParentModel   string   `json:"parent_model"`
+	Format        string   `json:"format"`
+	Family        string   `json:"family"`
+	Families      []string `json:"families"`
+	ParameterSize string   `json:"parameter_size"`
+	QuantLevel    string   `json:"quantization_level"`
+}
+
+// ProcessModel describes a currently loaded model returned by /api/ps.
+type ProcessModel struct {
+	Name          string              `json:"name"`
+	Model         string              `json:"model"`
+	Size          int64               `json:"size"`
+	Digest        string              `json:"digest"`
+	Details       ProcessModelDetails `json:"details"`
+	ExpiresAt     *time.Time          `json:"expires_at,omitempty"`
+	SizeVRAM      int64               `json:"size_vram"`
+	ContextLength int                 `json:"context_length"`
+}
+
+// ProcessStatus is the response from /api/ps listing running models.
+type ProcessStatus struct {
+	Models []ProcessModel `json:"models"`
+}
+
+// Ps returns the list of models currently loaded in memory.
+// The URL is derived from the DSN by replacing the last path segment with "ps".
+func (c *Client) Ps() (*ProcessStatus, error) {
+	psURL := strings.TrimSuffix(c.ds.URL, "/")
+	if i := strings.LastIndex(psURL, "/"); i >= 0 {
+		psURL = psURL[:i] + "/ps"
+	}
+
+	req, err := http.NewRequest("GET", psURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create ps request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.ds.Token)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send ps request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("ps request failed, status code: %d, body: %s", resp.StatusCode, body)
+	}
+
+	var status ProcessStatus
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		return nil, fmt.Errorf("failed to decode ps response: %w", err)
+	}
+	return &status, nil
 }
 
 // Query sends a request to the ollama API
