@@ -91,7 +91,10 @@ var (
 // --- Tea messages ----------------------------------------------------------
 
 type tokenMsg string
-type doneMsg struct{}
+type doneMsg struct {
+	promptEvalCount int
+	evalCount       int
+}
 type errMsg struct{ err error }
 type psMsg struct{ models map[string]ollama.ProcessModel }
 
@@ -140,6 +143,10 @@ type model struct {
 	tokenCount  int
 	streamStart time.Time
 	lastTokSec  float64 // final tok/s preserved after stream ends
+
+	// Context window tracking
+	ctxSize int // total context window size (from /api/ps)
+	ctxUsed int // tokens used in context (prompt + eval from last response)
 
 	// Markdown renderer
 	mdRenderer *glamour.TermRenderer
@@ -214,6 +221,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case psMsg:
 		m.runningModels = msg.models
+		if m.selectedModel != "" {
+			if pm, ok := msg.models[m.selectedModel]; ok {
+				m.ctxSize = pm.ContextLength
+			}
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -256,9 +268,13 @@ func (m model) updateModelSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			m.selectedModel = m.models[m.cursor]
 			m.screen = screenChat
+			if pm, ok := m.runningModels[m.selectedModel]; ok {
+				m.ctxSize = pm.ContextLength
+			}
 			m.resizeChat()
-			cmd := m.textarea.Focus()
-			return m, cmd
+			focusCmd := m.textarea.Focus()
+			psCmd := m.fetchPs()
+			return m, tea.Batch(focusCmd, psCmd)
 		}
 	}
 	return m, nil
@@ -382,10 +398,12 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if elapsed > 0 {
 			m.lastTokSec = float64(m.tokenCount) / elapsed
 		}
+		m.ctxUsed = msg.promptEvalCount + msg.evalCount
 		m.streaming = false
 		m.refreshViewport()
-		cmd := m.textarea.Focus()
-		return m, cmd
+		focusCmd := m.textarea.Focus()
+		psCmd := m.fetchPs()
+		return m, tea.Batch(focusCmd, psCmd)
 
 	case errMsg:
 		elapsed := time.Since(m.streamStart).Seconds()
@@ -455,6 +473,7 @@ func (m model) runQuery() {
 
 	fullPrompt := m.buildConversationPrompt()
 
+	var finalPromptEval, finalEval int
 	err := m.client.Query(ollama.Request{
 		Model:  m.selectedModel,
 		Prompt: fullPrompt,
@@ -466,6 +485,12 @@ func (m model) runQuery() {
 			if res.Response != nil {
 				p.Send(tokenMsg(*res.Response))
 			}
+			if res.PromptEvalCount != nil {
+				finalPromptEval = *res.PromptEvalCount
+			}
+			if res.EvalCount != nil {
+				finalEval = *res.EvalCount
+			}
 			return nil
 		},
 	})
@@ -473,7 +498,7 @@ func (m model) runQuery() {
 		p.Send(errMsg{err: err})
 		return
 	}
-	p.Send(doneMsg{})
+	p.Send(doneMsg{promptEvalCount: finalPromptEval, evalCount: finalEval})
 }
 
 func (m *model) refreshViewport() {
@@ -644,7 +669,24 @@ func (m model) viewChat() string {
 		Render(sb.String())
 }
 
+func (m model) ctxInfo() string {
+	if m.ctxSize <= 0 && m.ctxUsed <= 0 {
+		return ""
+	}
+	avail := m.ctxSize - m.ctxUsed
+	if avail < 0 {
+		avail = 0
+	}
+	pct := float64(0)
+	if m.ctxSize > 0 {
+		pct = float64(m.ctxUsed) / float64(m.ctxSize) * 100
+	}
+	return fmt.Sprintf("ctx %d/%d (%.0f%% used, %d free)", m.ctxUsed, m.ctxSize, pct, avail)
+}
+
 func (m model) statusLine() string {
+	ctx := m.ctxInfo()
+
 	if m.streaming {
 		elapsed := time.Since(m.streamStart).Seconds()
 		tokSec := float64(0)
@@ -654,7 +696,11 @@ func (m model) statusLine() string {
 		stats := statsStyle.Render(
 			fmt.Sprintf("%d tok  •  %.1f tok/s", m.tokenCount, tokSec),
 		)
-		return fmt.Sprintf("⏳ %s  •  ctrl+c quit", stats)
+		line := fmt.Sprintf("⏳ %s", stats)
+		if ctx != "" {
+			line += "  •  " + statsStyle.Render(ctx)
+		}
+		return line + "  •  ctrl+c quit"
 	}
 
 	parts := []string{"enter send", "ctrl+m model", "esc back", "ctrl+c quit"}
@@ -662,7 +708,14 @@ func (m model) statusLine() string {
 		stats := statsStyle.Render(
 			fmt.Sprintf("%d tok  •  %.1f tok/s", m.tokenCount, m.lastTokSec),
 		)
-		return fmt.Sprintf("✓ %s  •  %s", stats, strings.Join(parts, "  •  "))
+		line := fmt.Sprintf("✓ %s", stats)
+		if ctx != "" {
+			line += "  •  " + statsStyle.Render(ctx)
+		}
+		return line + "  •  " + strings.Join(parts, "  •  ")
+	}
+	if ctx != "" {
+		return statsStyle.Render(ctx) + "  •  " + strings.Join(parts, "  •  ")
 	}
 	return strings.Join(parts, "  •  ")
 }

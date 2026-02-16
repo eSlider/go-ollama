@@ -96,10 +96,12 @@ func (i RequestImage) MarshalJSON() ([]byte, error) {
 }
 
 type Response struct {
-	Model     *string    `json:"model,omitempty"`
-	CreatedAt *time.Time `json:"created_at,omitempty"`
-	Response  *string    `json:"response,omitempty"`
-	Done      *bool      `json:"done,omitempty"`
+	Model           *string    `json:"model,omitempty"`
+	CreatedAt       *time.Time `json:"created_at,omitempty"`
+	Response        *string    `json:"response,omitempty"`
+	Done            *bool      `json:"done,omitempty"`
+	PromptEvalCount *int       `json:"prompt_eval_count,omitempty"`
+	EvalCount       *int       `json:"eval_count,omitempty"`
 }
 
 // ToJson converts the Request to a JSON string
@@ -128,6 +130,62 @@ func NewOpenWebUiClient(dsn *DSN) *Client {
 		},
 		ds: dsn,
 	}
+}
+
+// EmbedRequest is a request to the /api/embed endpoint.
+type EmbedRequest struct {
+	Model     string   `json:"model"`
+	Input     []string `json:"input"`
+	Truncate  *bool    `json:"truncate,omitempty"`
+	KeepAlive *string  `json:"keep_alive,omitempty"`
+}
+
+// EmbedResponse is the response from the /api/embed endpoint.
+type EmbedResponse struct {
+	Model           string      `json:"model"`
+	Embeddings      [][]float64 `json:"embeddings"`
+	TotalDuration   int64       `json:"total_duration"`
+	LoadDuration    int64       `json:"load_duration"`
+	PromptEvalCount int         `json:"prompt_eval_count"`
+}
+
+// Embed generates embeddings for the given input texts.
+// The URL is derived from the DSN by replacing the last path segment with "embed".
+func (c *Client) Embed(request EmbedRequest) (*EmbedResponse, error) {
+	embedURL := strings.TrimSuffix(c.ds.URL, "/")
+	if i := strings.LastIndex(embedURL, "/"); i >= 0 {
+		embedURL = embedURL[:i] + "/embed"
+	}
+
+	body, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal embed request: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", embedURL, strings.NewReader(string(body)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create embed request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.ds.Token)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send embed request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("embed request failed, status code: %d, body: %s", resp.StatusCode, respBody)
+	}
+
+	var result EmbedResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode embed response: %w", err)
+	}
+	return &result, nil
 }
 
 // ProcessModelDetails holds model format metadata from the ps endpoint.
