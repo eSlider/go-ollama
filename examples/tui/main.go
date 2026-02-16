@@ -684,13 +684,6 @@ func main() {
 	url := os.Getenv("OPEN_WEB_API_GENERATE_URL")
 	token := os.Getenv("OPEN_WEB_API_TOKEN")
 
-	if url == "" {
-		url = "https://ai.produktor.io/ollama/api/generate"
-	}
-	if token == "" {
-		token = "sk-86a57f57175d405db4f9ca978d045bb6"
-	}
-
 	client := ollama.NewOpenWebUiClient(&ollama.DSN{
 		URL:   url,
 		Token: token,
