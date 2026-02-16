@@ -1,6 +1,7 @@
 package ollama
 
 import (
+	"math"
 	"os"
 	"strings"
 	"testing"
@@ -239,4 +240,93 @@ func TestIntegration_Ps(t *testing.T) {
 			t.Errorf("model %s has empty parameter_size", m.Name)
 		}
 	}
+}
+
+func TestIntegration_Embed(t *testing.T) {
+	client := integrationClient(t)
+
+	resp, err := client.Embed(EmbedRequest{
+		Model: "llama3.2:1b",
+		Input: []string{"Hello world"},
+	})
+	if err != nil {
+		t.Fatalf("Embed error: %v", err)
+	}
+
+	if resp.Model != "llama3.2:1b" {
+		t.Errorf("model = %q, want llama3.2:1b", resp.Model)
+	}
+	if len(resp.Embeddings) != 1 {
+		t.Fatalf("got %d embeddings, want 1", len(resp.Embeddings))
+	}
+	dim := len(resp.Embeddings[0])
+	t.Logf("Embedding dimension: %d, eval tokens: %d, duration: %dns",
+		dim, resp.PromptEvalCount, resp.TotalDuration)
+
+	if dim == 0 {
+		t.Error("embedding dimension is 0")
+	}
+
+	// Verify the vector is not all zeros.
+	var norm float64
+	for _, v := range resp.Embeddings[0] {
+		norm += v * v
+	}
+	norm = math.Sqrt(norm)
+	if norm < 0.01 {
+		t.Error("embedding vector norm is near zero")
+	}
+}
+
+func TestIntegration_EmbedBatch(t *testing.T) {
+	client := integrationClient(t)
+
+	inputs := []string{
+		"The cat sat on the mat",
+		"The dog lay on the rug",
+		"Quantum computing uses qubits",
+	}
+
+	resp, err := client.Embed(EmbedRequest{
+		Model: "llama3.2:1b",
+		Input: inputs,
+	})
+	if err != nil {
+		t.Fatalf("Embed error: %v", err)
+	}
+
+	if len(resp.Embeddings) != len(inputs) {
+		t.Fatalf("got %d embeddings, want %d", len(resp.Embeddings), len(inputs))
+	}
+
+	// All embeddings should have the same dimension.
+	dim := len(resp.Embeddings[0])
+	for i, emb := range resp.Embeddings {
+		if len(emb) != dim {
+			t.Errorf("embedding[%d] dim = %d, want %d", i, len(emb), dim)
+		}
+	}
+
+	// Similar sentences should be closer than dissimilar ones.
+	simCatDog := cosineSimilarity(resp.Embeddings[0], resp.Embeddings[1])
+	simCatQuantum := cosineSimilarity(resp.Embeddings[0], resp.Embeddings[2])
+	t.Logf("Similarity cat/dog: %.4f, cat/quantum: %.4f", simCatDog, simCatQuantum)
+
+	if simCatDog <= simCatQuantum {
+		t.Errorf("expected cat/dog similarity (%.4f) > cat/quantum similarity (%.4f)",
+			simCatDog, simCatQuantum)
+	}
+}
+
+func cosineSimilarity(a, b []float64) float64 {
+	var dot, normA, normB float64
+	for i := range a {
+		dot += a[i] * b[i]
+		normA += a[i] * a[i]
+		normB += b[i] * b[i]
+	}
+	if normA == 0 || normB == 0 {
+		return 0
+	}
+	return dot / (math.Sqrt(normA) * math.Sqrt(normB))
 }
