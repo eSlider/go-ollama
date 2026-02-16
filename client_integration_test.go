@@ -1,7 +1,6 @@
 package ollama
 
 import (
-	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -239,16 +238,5 @@ func TestIntegration_Ps(t *testing.T) {
 		if m.Details.ParameterSize == "" {
 			t.Errorf("model %s has empty parameter_size", m.Name)
 		}
-	}
-}
-
-func formatBytes(b int64) string {
-	switch {
-	case b >= 1<<30:
-		return fmt.Sprintf("%.1fGB", float64(b)/(1<<30))
-	case b >= 1<<20:
-		return fmt.Sprintf("%.0fMB", float64(b)/(1<<20))
-	default:
-		return fmt.Sprintf("%dB", b)
 	}
 }
