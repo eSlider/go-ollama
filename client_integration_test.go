@@ -9,15 +9,16 @@ import (
 )
 
 // Integration tests that hit a live Ollama / Open WebUI instance.
-// Skipped when OPEN_WEB_API_GENERATE_URL is not set.
+// When OPEN_WEB_API_GENERATE_URL is unset, NewOpenWebUiClient uses local Ollama (DefaultGenerateURL).
+// Skipped in CI where no Ollama service is available.
 
 func integrationClient(t *testing.T) *Client {
 	t.Helper()
+	if os.Getenv("CI") != "" {
+		t.Skip("integration tests require a live Ollama instance; skipped in CI")
+	}
 	url := os.Getenv("OPEN_WEB_API_GENERATE_URL")
 	token := os.Getenv("OPEN_WEB_API_TOKEN")
-	if url == "" {
-		t.Skip("OPEN_WEB_API_GENERATE_URL not set, skipping integration test")
-	}
 	return NewOpenWebUiClient(&DSN{URL: url, Token: token})
 }
 

@@ -38,6 +38,28 @@ func simulateStreamBody(tokens []string, model string) string {
 	return sb.String()
 }
 
+func TestNewOpenWebUiClient_DefaultURL(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		dsn  *DSN
+		want string
+	}{
+		{"nil dsn", nil, DefaultGenerateURL},
+		{"empty URL", &DSN{}, DefaultGenerateURL},
+		{"whitespace URL", &DSN{URL: "  \t "}, DefaultGenerateURL},
+		{"custom URL", &DSN{URL: "http://example/ollama/api/generate"}, "http://example/ollama/api/generate"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			c := NewOpenWebUiClient(tc.dsn)
+			if c.ds.URL != tc.want {
+				t.Fatalf("URL = %q, want %q", c.ds.URL, tc.want)
+			}
+		})
+	}
+}
+
 func TestQueryStream_TokenByToken(t *testing.T) {
 	tokens := []string{"Hello", ", ", "world", "!"}
 	body := simulateStreamBody(tokens, "test-model")

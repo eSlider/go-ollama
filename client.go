@@ -15,6 +15,10 @@ import (
 	"time"
 )
 
+// DefaultGenerateURL is the Ollama /api/generate endpoint on the local default port.
+// Used when DSN.URL is empty in NewOpenWebUiClient.
+const DefaultGenerateURL = "http://localhost:11434/api/generate"
+
 // Client is a client for the ollama Web UI to use Authenticated API calls
 type Client struct {
 	client *http.Client // HTTP client
@@ -122,13 +126,21 @@ func (r *Request) ToJson() string {
 	return string(data)
 }
 
-// NewOpenWebUiClient creates a new Client
+// NewOpenWebUiClient creates a new Client.
+// If dsn is nil or dsn.URL is empty (after trimming space), URL defaults to DefaultGenerateURL (local Ollama).
 func NewOpenWebUiClient(dsn *DSN) *Client {
+	var resolved DSN
+	if dsn != nil {
+		resolved = *dsn
+	}
+	if strings.TrimSpace(resolved.URL) == "" {
+		resolved.URL = DefaultGenerateURL
+	}
 	return &Client{
 		client: &http.Client{
 			Timeout: 0,
 		},
-		ds: dsn,
+		ds: &resolved,
 	}
 }
 

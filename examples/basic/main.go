@@ -1,9 +1,9 @@
 // Package main demonstrates basic usage of the ollama client library.
 //
-// Set environment variables before running:
+// By default it uses local Ollama. Optional overrides:
 //
-//	export OPEN_WEB_API_GENERATE_URL="http://localhost:11434/api/generate"
-//	export OPEN_WEB_API_TOKEN="your-token"
+//	export OPEN_WEB_API_GENERATE_URL="https://ai.example.com/ollama/api/generate"
+//	export OPEN_WEB_API_TOKEN="sk-..."
 //	go run ./examples/basic/
 package main
 
@@ -15,17 +15,9 @@ import (
 )
 
 func main() {
-	url := os.Getenv("OPEN_WEB_API_GENERATE_URL")
-	token := os.Getenv("OPEN_WEB_API_TOKEN")
-
-	if url == "" {
-		fmt.Fprintln(os.Stderr, "OPEN_WEB_API_GENERATE_URL is not set")
-		os.Exit(1)
-	}
-
 	client := ollama.NewOpenWebUiClient(&ollama.DSN{
-		URL:   url,
-		Token: token,
+		URL:   os.Getenv("OPEN_WEB_API_GENERATE_URL"),
+		Token: os.Getenv("OPEN_WEB_API_TOKEN"),
 	})
 
 	// Simple text query with streaming output

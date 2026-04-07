@@ -1,8 +1,8 @@
 // Package main provides a TUI chat client for Ollama / Open WebUI.
 //
-// Set environment variables before running:
+// By default it talks to local Ollama (http://localhost:11434). To use Open WebUI or another host:
 //
-//	export OPEN_WEB_API_GENERATE_URL="https://ai.produktor.io/ollama/api/generate"
+//	export OPEN_WEB_API_GENERATE_URL="https://ai.example.com/ollama/api/generate"
 //	export OPEN_WEB_API_TOKEN="sk-..."
 //	go run ./examples/tui/
 package main
@@ -24,15 +24,15 @@ import (
 
 var defaultModels = []string{
 	"gemma3:1b",
-	"gemma3:4b",
-	"gemma3:12b",
-	"llama3.2:1b",
-	"llama3.2:3b",
-	"deepseek-r1:8b",
-	"deepseek-r1:14b",
-	"qwen2.5-coder:1.5b",
-	"kirito1/qwen3-coder:latest",
-	"gpt-oss:latest",
+	//"gemma3:4b",
+	//"gemma3:12b",
+	//"llama3.2:1b",
+	//"llama3.2:3b",
+	//"deepseek-r1:8b",
+	//"deepseek-r1:14b",
+	//"qwen2.5-coder:1.5b",
+	//"kirito1/qwen3-coder:latest",
+	//"gpt-oss:latest",
 }
 
 // --- Styles ----------------------------------------------------------------
@@ -96,7 +96,9 @@ type doneMsg struct {
 	evalCount       int
 }
 type errMsg struct{ err error }
-type psMsg struct{ models map[string]ollama.ProcessModel }
+type psMsg struct {
+	models map[string]ollama.ProcessModel
+}
 
 // --- Screen state ----------------------------------------------------------
 
@@ -734,12 +736,9 @@ func formatBytes(b int64) string {
 // --- Main ------------------------------------------------------------------
 
 func main() {
-	url := os.Getenv("OPEN_WEB_API_GENERATE_URL")
-	token := os.Getenv("OPEN_WEB_API_TOKEN")
-
 	client := ollama.NewOpenWebUiClient(&ollama.DSN{
-		URL:   url,
-		Token: token,
+		URL:   os.Getenv("OPEN_WEB_API_GENERATE_URL"),
+		Token: os.Getenv("OPEN_WEB_API_TOKEN"),
 	})
 
 	var p *tea.Program
