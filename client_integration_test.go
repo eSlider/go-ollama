@@ -33,8 +33,8 @@ func TestIntegration_StreamTokenByToken(t *testing.T) {
 		Model:  "gemma3:1b",
 		Prompt: "Say hello in one word",
 		Options: &RequestOptions{
-			Temperature: Float(0),
-			NumPredict:  Int(10),
+			Temperature: new(float64(0)),
+			NumPredict:  new(10),
 		},
 		OnJson: func(res Response) error {
 			if res.Response != nil {
@@ -74,10 +74,10 @@ func TestIntegration_SystemPrompt(t *testing.T) {
 	err := client.Query(Request{
 		Model:  "gemma3:1b",
 		Prompt: "What is your name?",
-		System: String("Your name is TestBot. Always introduce yourself by name."),
+		System: new("Your name is TestBot. Always introduce yourself by name."),
 		Options: &RequestOptions{
-			Temperature: Float(0),
-			NumPredict:  Int(30),
+			Temperature: new(float64(0)),
+			NumPredict:  new(30),
 		},
 		OnJson: func(res Response) error {
 			if res.Response != nil {
@@ -108,8 +108,8 @@ func TestIntegration_TokensPerSecond(t *testing.T) {
 		Model:  "gemma3:1b",
 		Prompt: "Count from 1 to 10",
 		Options: &RequestOptions{
-			Temperature: Float(0),
-			NumPredict:  Int(50),
+			Temperature: new(float64(0)),
+			NumPredict:  new(50),
 		},
 		OnJson: func(res Response) error {
 			if res.Response != nil && *res.Response != "" {
@@ -147,8 +147,8 @@ func TestIntegration_ConversationContext(t *testing.T) {
 		Model:  "gemma3:1b",
 		Prompt: conversation,
 		Options: &RequestOptions{
-			Temperature: Float(0),
-			NumPredict:  Int(30),
+			Temperature: new(float64(0)),
+			NumPredict:  new(30),
 		},
 		OnJson: func(res Response) error {
 			if res.Response != nil {
@@ -169,6 +169,8 @@ func TestIntegration_ConversationContext(t *testing.T) {
 	}
 }
 
+// TestIntegration_CodeBlockExtraction tests that the model can extract code blocks from a prompt.
+// Does: Verify that the model can extract multiple code blocks from a prompt.
 func TestIntegration_CodeBlockExtraction(t *testing.T) {
 	client := integrationClient(t)
 
@@ -179,8 +181,8 @@ func TestIntegration_CodeBlockExtraction(t *testing.T) {
 		Model:  "gemma3:1b",
 		Prompt: "Write a Go hello world program in a code block",
 		Options: &RequestOptions{
-			Temperature: Float(0),
-			NumPredict:  Int(100),
+			Temperature: new(float64(0)),
+			NumPredict:  new(100),
 		},
 		OnJson: func(res Response) error {
 			if res.Response != nil {

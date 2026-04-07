@@ -5,6 +5,7 @@
 package ollama
 
 import (
+	"crypto/tls"
 	base64 "encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -114,7 +115,7 @@ func (r *Request) ToJson() string {
 
 	if r.Images != nil {
 		// Convert images to base64
-		r.Stream = Bool(false)
+		r.Stream = new(false)
 		if r.Model == "" {
 			r.Model = "x/llama3.2-vision"
 		}
@@ -137,8 +138,12 @@ func NewOpenWebUiClient(dsn *DSN) *Client {
 		resolved.URL = DefaultGenerateURL
 	}
 	return &Client{
+		// Ignore tls
 		client: &http.Client{
 			Timeout: 0,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			},
 		},
 		ds: &resolved,
 	}
