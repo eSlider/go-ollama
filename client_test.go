@@ -16,10 +16,10 @@ func simulateStreamBody(tokens []string, model string) string {
 	now := time.Now()
 	for _, tok := range tokens {
 		r := Response{
-			Model:     String(model),
+			Model:     new(model),
 			CreatedAt: &now,
-			Response:  String(tok),
-			Done:      Bool(false),
+			Response:  new(tok),
+			Done:      new(false),
 		}
 		data, _ := json.Marshal(r)
 		sb.Write(data)
@@ -27,10 +27,10 @@ func simulateStreamBody(tokens []string, model string) string {
 	}
 	// Final "done" message
 	final := Response{
-		Model:     String(model),
+		Model:     new(model),
 		CreatedAt: &now,
-		Response:  String(""),
-		Done:      Bool(true),
+		Response:  new(""),
+		Done:      new(true),
 	}
 	data, _ := json.Marshal(final)
 	sb.Write(data)
@@ -100,7 +100,7 @@ func TestQueryStream_TokenByToken(t *testing.T) {
 }
 
 func TestQueryStream_OnJsonReceivesModel(t *testing.T) {
-	body := simulateStreamBody([]string{"hi"}, "llama3.2:3b")
+	body := simulateStreamBody([]string{"hi"}, "gemma3:1b")
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, body)
@@ -111,7 +111,7 @@ func TestQueryStream_OnJsonReceivesModel(t *testing.T) {
 
 	var models []string
 	err := client.Query(Request{
-		Model:  "llama3.2:3b",
+		Model:  "gemma3:1b",
 		Prompt: "test",
 		OnJson: func(res Response) error {
 			if res.Model != nil {
@@ -125,8 +125,8 @@ func TestQueryStream_OnJsonReceivesModel(t *testing.T) {
 	}
 
 	for _, m := range models {
-		if m != "llama3.2:3b" {
-			t.Errorf("model = %q, want %q", m, "llama3.2:3b")
+		if m != "gemma3:1b" {
+			t.Errorf("model = %q, want %q", m, "gemma3:1b")
 		}
 	}
 }
@@ -395,16 +395,16 @@ func TestQuery_RequestJSON(t *testing.T) {
 
 	client := NewOpenWebUiClient(&DSN{URL: srv.URL})
 	_ = client.Query(Request{
-		Model:  "llama3.2:3b",
+		Model:  "gemma3:1b",
 		Prompt: "test prompt",
 		Options: &RequestOptions{
-			Temperature: Float(0.5),
-			NumContext:  Int(4096),
+			Temperature: new(0.5),
+			NumContext:  new(4096),
 		},
 		OnJson: func(res Response) error { return nil },
 	})
 
-	if !strings.Contains(gotBody, `"model":"llama3.2:3b"`) {
+	if !strings.Contains(gotBody, `"model":"gemma3:1b"`) {
 		t.Errorf("body missing model: %s", gotBody)
 	}
 	if !strings.Contains(gotBody, `"prompt":"test prompt"`) {
