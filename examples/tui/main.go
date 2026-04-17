@@ -471,7 +471,7 @@ func (m model) runQuery() {
 	if m.systemPrompt != "" {
 		sysParts = append(sysParts, m.systemPrompt)
 	}
-	sys := ollama.String(strings.Join(sysParts, "\n"))
+	sys := new(strings.Join(sysParts, "\n"))
 
 	fullPrompt := m.buildConversationPrompt()
 
@@ -481,7 +481,7 @@ func (m model) runQuery() {
 		Prompt: fullPrompt,
 		System: sys,
 		Options: &ollama.RequestOptions{
-			Temperature: ollama.Float(0.7),
+			Temperature: new(0.7),
 		},
 		OnJson: func(res ollama.Response) error {
 			if res.Response != nil {
