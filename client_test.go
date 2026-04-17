@@ -16,10 +16,10 @@ func simulateStreamBody(tokens []string, model string) string {
 	now := time.Now()
 	for _, tok := range tokens {
 		r := Response{
-			Model:     new(model),
+			Model:     String(model),
 			CreatedAt: &now,
-			Response:  new(tok),
-			Done:      new(false),
+			Response:  String(tok),
+			Done:      Bool(false),
 		}
 		data, _ := json.Marshal(r)
 		sb.Write(data)
@@ -27,10 +27,10 @@ func simulateStreamBody(tokens []string, model string) string {
 	}
 	// Final "done" message
 	final := Response{
-		Model:     new(model),
+		Model:     String(model),
 		CreatedAt: &now,
-		Response:  new(""),
-		Done:      new(true),
+		Response:  String(""),
+		Done:      Bool(true),
 	}
 	data, _ := json.Marshal(final)
 	sb.Write(data)
@@ -398,8 +398,8 @@ func TestQuery_RequestJSON(t *testing.T) {
 		Model:  "gemma3:1b",
 		Prompt: "test prompt",
 		Options: &RequestOptions{
-			Temperature: new(0.5),
-			NumContext:  new(4096),
+			Temperature: Float(0.5),
+			NumContext:  Int(4096),
 		},
 		OnJson: func(res Response) error { return nil },
 	})

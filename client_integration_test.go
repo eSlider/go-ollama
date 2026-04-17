@@ -33,8 +33,8 @@ func TestIntegration_StreamTokenByToken(t *testing.T) {
 		Model:  "gemma3:1b",
 		Prompt: "Say hello in one word",
 		Options: &RequestOptions{
-			Temperature: new(float64(0)),
-			NumPredict:  new(10),
+			Temperature: Float(0),
+			NumPredict:  Int(10),
 		},
 		OnJson: func(res Response) error {
 			if res.Response != nil {
@@ -71,13 +71,14 @@ func TestIntegration_SystemPrompt(t *testing.T) {
 
 	var full strings.Builder
 
+	s := "Your name is TestBot. Always introduce yourself by name."
 	err := client.Query(Request{
 		Model:  "gemma3:1b",
 		Prompt: "What is your name?",
-		System: new("Your name is TestBot. Always introduce yourself by name."),
+		System: &s,
 		Options: &RequestOptions{
-			Temperature: new(float64(0)),
-			NumPredict:  new(30),
+			Temperature: Float(0),
+			NumPredict:  Int(30),
 		},
 		OnJson: func(res Response) error {
 			if res.Response != nil {
@@ -108,8 +109,8 @@ func TestIntegration_TokensPerSecond(t *testing.T) {
 		Model:  "gemma3:1b",
 		Prompt: "Count from 1 to 10",
 		Options: &RequestOptions{
-			Temperature: new(float64(0)),
-			NumPredict:  new(50),
+			Temperature: Float(0),
+			NumPredict:  Int(50),
 		},
 		OnJson: func(res Response) error {
 			if res.Response != nil && *res.Response != "" {
@@ -147,8 +148,8 @@ func TestIntegration_ConversationContext(t *testing.T) {
 		Model:  "gemma3:1b",
 		Prompt: conversation,
 		Options: &RequestOptions{
-			Temperature: new(float64(0)),
-			NumPredict:  new(30),
+			Temperature: Float(0),
+			NumPredict:  Int(30),
 		},
 		OnJson: func(res Response) error {
 			if res.Response != nil {
@@ -181,8 +182,8 @@ func TestIntegration_CodeBlockExtraction(t *testing.T) {
 		Model:  "gemma3:1b",
 		Prompt: "Write a Go hello world program in a code block",
 		Options: &RequestOptions{
-			Temperature: new(float64(0)),
-			NumPredict:  new(100),
+			Temperature: Float(0),
+			NumPredict:  Int(100),
 		},
 		OnJson: func(res Response) error {
 			if res.Response != nil {
