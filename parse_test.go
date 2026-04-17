@@ -5,7 +5,7 @@ import (
 )
 
 func TestParseCodeBlock_SingleBlock(t *testing.T) {
-	blocks := ParseCodeBlock(new("Some text\n```go\nfmt.Println(\"hello\")\n```\nMore text"))
+	blocks := ParseCodeBlock(String("Some text\n```go\nfmt.Println(\"hello\")\n```\nMore text"))
 
 	if len(blocks) != 1 {
 		t.Fatalf("got %d blocks, want 1", len(blocks))
@@ -19,7 +19,7 @@ func TestParseCodeBlock_SingleBlock(t *testing.T) {
 }
 
 func TestParseCodeBlock_MultipleBlocks(t *testing.T) {
-	blocks := ParseCodeBlock(new("```python\nprint('a')\n```\nmiddle\n```bash\necho b\n```\n"))
+	blocks := ParseCodeBlock(String("```python\nprint('a')\n```\nmiddle\n```bash\necho b\n```\n"))
 
 	if len(blocks) != 2 {
 		t.Fatalf("got %d blocks, want 2", len(blocks))
@@ -33,7 +33,7 @@ func TestParseCodeBlock_MultipleBlocks(t *testing.T) {
 }
 
 func TestParseCodeBlock_NoBlocks(t *testing.T) {
-	blocks := ParseCodeBlock(new("Just plain text with no code"))
+	blocks := ParseCodeBlock(String("Just plain text with no code"))
 
 	if len(blocks) != 0 {
 		t.Errorf("got %d blocks from plain text, want 0", len(blocks))
@@ -41,7 +41,7 @@ func TestParseCodeBlock_NoBlocks(t *testing.T) {
 }
 
 func TestParseCodeBlock_MultilineCode(t *testing.T) {
-	blocks := ParseCodeBlock(new("```javascript\nconst x = 1;\nconst y = 2;\nconsole.log(x + y);\n```\n"))
+	blocks := ParseCodeBlock(String("```javascript\nconst x = 1;\nconst y = 2;\nconsole.log(x + y);\n```\n"))
 
 	if len(blocks) != 1 {
 		t.Fatalf("got %d blocks, want 1", len(blocks))
@@ -52,7 +52,7 @@ func TestParseCodeBlock_MultilineCode(t *testing.T) {
 }
 
 func TestParseCodeBlock_SQL(t *testing.T) {
-	blocks := ParseCodeBlock(new("Run this:\n```sql\nSELECT * FROM users\nWHERE active = true;\n```\nDone."))
+	blocks := ParseCodeBlock(String("Run this:\n```sql\nSELECT * FROM users\nWHERE active = true;\n```\nDone."))
 
 	if len(blocks) != 1 {
 		t.Fatalf("got %d blocks, want 1", len(blocks))
@@ -63,16 +63,16 @@ func TestParseCodeBlock_SQL(t *testing.T) {
 }
 
 func TestConvertHelpers(t *testing.T) {
-	if *new(42) != 42 {
+	if *Int(42) != 42 {
 		t.Error("Int(42) failed")
 	}
-	if *new("hello") != "hello" {
+	if *String("hello") != "hello" {
 		t.Error("String failed")
 	}
-	if *new(true) != true {
+	if *Bool(true) != true {
 		t.Error("Bool failed")
 	}
-	if *new(3.14) != 3.14 {
+	if *Float(3.14) != 3.14 {
 		t.Error("Float failed")
 	}
 }
@@ -82,7 +82,7 @@ func TestRequestToJson(t *testing.T) {
 		Model:  "llama3.2:3b",
 		Prompt: "test",
 		Options: &RequestOptions{
-			Temperature: new(0.7),
+			Temperature: Float(0.7),
 		},
 	}
 	js := r.ToJson()
@@ -93,10 +93,11 @@ func TestRequestToJson(t *testing.T) {
 }
 
 func TestRequestToJson_WithFormat(t *testing.T) {
+	format := FormatJson
 	r := Request{
 		Model:  "m",
 		Prompt: "return json",
-		Format: new(FormatJson),
+		Format: &format,
 	}
 	js := r.ToJson()
 

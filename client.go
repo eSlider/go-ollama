@@ -115,7 +115,7 @@ func (r *Request) ToJson() string {
 
 	if r.Images != nil {
 		// Convert images to base64
-		r.Stream = new(false)
+		r.Stream = Bool(false)
 		if r.Model == "" {
 			r.Model = "x/llama3.2-vision"
 		}
