@@ -149,63 +149,169 @@ func NewOpenWebUiClient(dsn *DSN) *Client {
 	}
 }
 
-// EmbedRequest is a request to the /api/embed endpoint.
-type EmbedRequest struct {
-	Model     string   `json:"model"`
-	Input     []string `json:"input"`
-	Truncate  *bool    `json:"truncate,omitempty"`
-	KeepAlive *string  `json:"keep_alive,omitempty"`
+// apiURL replaces the last path segment of the DSN URL with the given segment.
+// e.g. "http://host/api/generate" + "tags" → "http://host/api/tags"
+func (c *Client) apiURL(segment string) string {
+	base := strings.TrimSuffix(c.ds.URL, "/")
+	if i := strings.LastIndex(base, "/"); i >= 0 {
+		return base[:i] + "/" + segment
+	}
+	return base + "/" + segment
 }
 
-// EmbedResponse is the response from the /api/embed endpoint.
-type EmbedResponse struct {
-	Model           string      `json:"model"`
-	Embeddings      [][]float64 `json:"embeddings"`
-	TotalDuration   int64       `json:"total_duration"`
-	LoadDuration    int64       `json:"load_duration"`
-	PromptEvalCount int         `json:"prompt_eval_count"`
-}
-
-// Embed generates embeddings for the given input texts.
-// The URL is derived from the DSN by replacing the last path segment with "embed".
-func (c *Client) Embed(request EmbedRequest) (*EmbedResponse, error) {
-	embedURL := strings.TrimSuffix(c.ds.URL, "/")
-	if i := strings.LastIndex(embedURL, "/"); i >= 0 {
-		embedURL = embedURL[:i] + "/embed"
+// doJSON performs an HTTP request and decodes the JSON response into dest.
+func (c *Client) doJSON(method, url string, body interface{}, dest interface{}) error {
+	var reqBody io.Reader
+	if body != nil {
+		data, err := json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("failed to marshal request body: %w", err)
+		}
+		reqBody = strings.NewReader(string(data))
 	}
 
-	body, err := json.Marshal(request)
+	req, err := http.NewRequest(method, url, reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal embed request: %w", err)
-	}
-
-	req, err := http.NewRequest("POST", embedURL, strings.NewReader(string(body)))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create embed request: %w", err)
+		return fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.ds.Token)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if c.ds.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.ds.Token)
+	}
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to send embed request: %w", err)
+		return fmt.Errorf("failed to send request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("embed request failed, status code: %d, body: %s", resp.StatusCode, respBody)
+		return fmt.Errorf("request failed, status code: %d, body: %s", resp.StatusCode, respBody)
 	}
 
-	var result EmbedResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode embed response: %w", err)
+	if dest != nil {
+		if err := json.NewDecoder(resp.Body).Decode(dest); err != nil {
+			return fmt.Errorf("failed to decode response: %w", err)
+		}
+	}
+	return nil
+}
+
+// doStream performs a POST and reads newline-delimited JSON, calling onJSON for each line.
+func (c *Client) doStream(url string, body interface{}, onJSON func(json.RawMessage) error) error {
+	data, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("failed to marshal request body: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", url, strings.NewReader(string(data)))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	if c.ds.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.ds.Token)
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("request failed, status code: %d, body: %s", resp.StatusCode, respBody)
+	}
+
+	scanner := NewSplitScanner(resp.Body, "\n")
+	for scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return fmt.Errorf("failed to read response: %w", err)
+		}
+		if err := onJSON(scanner.Bytes()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// --- /api/version ----------------------------------------------------------
+
+// VersionResponse is the response from GET /api/version.
+type VersionResponse struct {
+	Version string `json:"version"`
+}
+
+// Version returns the Ollama server version.
+func (c *Client) Version() (*VersionResponse, error) {
+	var result VersionResponse
+	if err := c.doJSON("GET", c.apiURL("version"), nil, &result); err != nil {
+		return nil, err
 	}
 	return &result, nil
 }
 
-// ProcessModelDetails holds model format metadata from the ps endpoint.
+// --- /api/tags -------------------------------------------------------------
+
+// TagModel describes a model returned by the /api/tags endpoint.
+type TagModel struct {
+	Name       string              `json:"name"`
+	Model      string              `json:"model"`
+	ModifiedAt string              `json:"modified_at"`
+	Size       int64               `json:"size"`
+	Digest     string              `json:"digest"`
+	Details    ProcessModelDetails `json:"details"`
+}
+
+// TagsResponse is the response from /api/tags listing available models.
+type TagsResponse struct {
+	Models []TagModel `json:"models"`
+}
+
+// Tags returns the list of locally available models.
+func (c *Client) Tags() (*TagsResponse, error) {
+	var result TagsResponse
+	if err := c.doJSON("GET", c.apiURL("tags"), nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// --- /api/show -------------------------------------------------------------
+
+// ShowRequest is the request body for POST /api/show.
+type ShowRequest struct {
+	Name    string `json:"name"`
+	Verbose *bool  `json:"verbose,omitempty"`
+}
+
+// ShowResponse is the response from POST /api/show.
+type ShowResponse struct {
+	Modelfile  string                 `json:"modelfile"`
+	Parameters string                 `json:"parameters"`
+	Template   string                 `json:"template"`
+	Details    ProcessModelDetails    `json:"details"`
+	ModelInfo  map[string]interface{} `json:"model_info"`
+}
+
+// Show returns detailed information about a model.
+func (c *Client) Show(request ShowRequest) (*ShowResponse, error) {
+	var result ShowResponse
+	if err := c.doJSON("POST", c.apiURL("show"), request, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// --- /api/ps ---------------------------------------------------------------
+
+// ProcessModelDetails holds model format metadata.
 type ProcessModelDetails struct {
 	ParentModel   string   `json:"parent_model"`
 	Format        string   `json:"format"`
@@ -233,36 +339,281 @@ type ProcessStatus struct {
 }
 
 // Ps returns the list of models currently loaded in memory.
-// The URL is derived from the DSN by replacing the last path segment with "ps".
 func (c *Client) Ps() (*ProcessStatus, error) {
-	psURL := strings.TrimSuffix(c.ds.URL, "/")
-	if i := strings.LastIndex(psURL, "/"); i >= 0 {
-		psURL = psURL[:i] + "/ps"
+	var result ProcessStatus
+	if err := c.doJSON("GET", c.apiURL("ps"), nil, &result); err != nil {
+		return nil, err
 	}
+	return &result, nil
+}
 
-	req, err := http.NewRequest("GET", psURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create ps request: %w", err)
+// --- /api/embed ------------------------------------------------------------
+
+// EmbedRequest is a request to the /api/embed endpoint.
+type EmbedRequest struct {
+	Model     string   `json:"model"`
+	Input     []string `json:"input"`
+	Truncate  *bool    `json:"truncate,omitempty"`
+	KeepAlive *string  `json:"keep_alive,omitempty"`
+}
+
+// EmbedResponse is the response from the /api/embed endpoint.
+type EmbedResponse struct {
+	Model           string      `json:"model"`
+	Embeddings      [][]float64 `json:"embeddings"`
+	TotalDuration   int64       `json:"total_duration"`
+	LoadDuration    int64       `json:"load_duration"`
+	PromptEvalCount int         `json:"prompt_eval_count"`
+}
+
+// Embed generates embeddings for the given input texts.
+func (c *Client) Embed(request EmbedRequest) (*EmbedResponse, error) {
+	var result EmbedResponse
+	if err := c.doJSON("POST", c.apiURL("embed"), request, &result); err != nil {
+		return nil, err
 	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.ds.Token)
+	return &result, nil
+}
+
+// --- /api/chat -------------------------------------------------------------
+
+// ChatMessage represents a single message in a chat conversation.
+type ChatMessage struct {
+	Role      string         `json:"role"`
+	Content   string         `json:"content"`
+	Images    []RequestImage `json:"images,omitempty"`
+	ToolCalls []ToolCall     `json:"tool_calls,omitempty"`
+}
+
+// ToolCall represents a tool invocation requested by the model.
+type ToolCall struct {
+	Function ToolCallFunction `json:"function"`
+}
+
+// ToolCallFunction describes the function name and arguments of a tool call.
+type ToolCallFunction struct {
+	Name      string                 `json:"name"`
+	Arguments map[string]interface{} `json:"arguments"`
+}
+
+// ChatRequest is the request body for POST /api/chat.
+type ChatRequest struct {
+	Model     string          `json:"model"`
+	Messages  []ChatMessage   `json:"messages"`
+	Format    *RequestFormat  `json:"format,omitempty"`
+	Options   *RequestOptions `json:"options,omitempty"`
+	Stream    *bool           `json:"stream,omitempty"`
+	KeepAlive *string         `json:"keep_alive,omitempty"`
+}
+
+// ChatResponse is a single streamed (or non-streamed) response from POST /api/chat.
+type ChatResponse struct {
+	Model           string      `json:"model"`
+	CreatedAt       *time.Time  `json:"created_at,omitempty"`
+	Message         ChatMessage `json:"message"`
+	Done            bool        `json:"done"`
+	DoneReason      string      `json:"done_reason,omitempty"`
+	TotalDuration   int64       `json:"total_duration,omitempty"`
+	LoadDuration    int64       `json:"load_duration,omitempty"`
+	PromptEvalCount int         `json:"prompt_eval_count,omitempty"`
+	EvalCount       int         `json:"eval_count,omitempty"`
+}
+
+// Chat sends a chat completion request. It streams newline-delimited JSON and
+// calls onResponse for each chunk. For non-streaming, set Stream to Bool(false)
+// and the single response will still be delivered via onResponse.
+func (c *Client) Chat(request ChatRequest, onResponse func(ChatResponse) error) error {
+	return c.doStream(c.apiURL("chat"), request, func(raw json.RawMessage) error {
+		var res ChatResponse
+		if err := json.Unmarshal(raw, &res); err != nil {
+			return fmt.Errorf("failed to unmarshal chat response: %w", err)
+		}
+		return onResponse(res)
+	})
+}
+
+// --- /api/copy -------------------------------------------------------------
+
+// CopyRequest is the request body for POST /api/copy.
+type CopyRequest struct {
+	Source      string `json:"source"`
+	Destination string `json:"destination"`
+}
+
+// Copy duplicates a model under a new name.
+func (c *Client) Copy(request CopyRequest) error {
+	return c.doJSON("POST", c.apiURL("copy"), request, nil)
+}
+
+// --- /api/delete -----------------------------------------------------------
+
+// DeleteRequest is the request body for DELETE /api/delete.
+type DeleteRequest struct {
+	Name string `json:"name"`
+}
+
+// Delete removes a model and its data.
+func (c *Client) Delete(request DeleteRequest) error {
+	data, err := json.Marshal(request)
+	if err != nil {
+		return fmt.Errorf("failed to marshal delete request: %w", err)
+	}
+	req, err := http.NewRequest("DELETE", c.apiURL("delete"), strings.NewReader(string(data)))
+	if err != nil {
+		return fmt.Errorf("failed to create delete request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.ds.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.ds.Token)
+	}
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to send ps request: %w", err)
+		return fmt.Errorf("failed to send delete request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("ps request failed, status code: %d, body: %s", resp.StatusCode, body)
+		return fmt.Errorf("delete request failed, status code: %d, body: %s", resp.StatusCode, body)
+	}
+	return nil
+}
+
+// --- /api/pull -------------------------------------------------------------
+
+// PullRequest is the request body for POST /api/pull.
+type PullRequest struct {
+	Name     string `json:"name"`
+	Insecure *bool  `json:"insecure,omitempty"`
+	Stream   *bool  `json:"stream,omitempty"`
+}
+
+// PullResponse is a single streamed status from POST /api/pull.
+type PullResponse struct {
+	Status    string `json:"status"`
+	Digest    string `json:"digest,omitempty"`
+	Total     int64  `json:"total,omitempty"`
+	Completed int64  `json:"completed,omitempty"`
+}
+
+// Pull downloads a model from the Ollama registry. Progress is reported via onStatus.
+func (c *Client) Pull(request PullRequest, onStatus func(PullResponse) error) error {
+	return c.doStream(c.apiURL("pull"), request, func(raw json.RawMessage) error {
+		var res PullResponse
+		if err := json.Unmarshal(raw, &res); err != nil {
+			return fmt.Errorf("failed to unmarshal pull response: %w", err)
+		}
+		return onStatus(res)
+	})
+}
+
+// --- /api/push -------------------------------------------------------------
+
+// PushRequest is the request body for POST /api/push.
+type PushRequest struct {
+	Name     string `json:"name"`
+	Insecure *bool  `json:"insecure,omitempty"`
+	Stream   *bool  `json:"stream,omitempty"`
+}
+
+// PushResponse is a single streamed status from POST /api/push.
+type PushResponse struct {
+	Status    string `json:"status"`
+	Digest    string `json:"digest,omitempty"`
+	Total     int64  `json:"total,omitempty"`
+	Completed int64  `json:"completed,omitempty"`
+}
+
+// Push uploads a model to the Ollama registry. Progress is reported via onStatus.
+func (c *Client) Push(request PushRequest, onStatus func(PushResponse) error) error {
+	return c.doStream(c.apiURL("push"), request, func(raw json.RawMessage) error {
+		var res PushResponse
+		if err := json.Unmarshal(raw, &res); err != nil {
+			return fmt.Errorf("failed to unmarshal push response: %w", err)
+		}
+		return onStatus(res)
+	})
+}
+
+// --- /api/create -----------------------------------------------------------
+
+// CreateRequest is the request body for POST /api/create.
+type CreateRequest struct {
+	Model     string `json:"model"`
+	From      string `json:"from,omitempty"`
+	Modelfile string `json:"modelfile,omitempty"`
+	System    string `json:"system,omitempty"`
+	Stream    *bool  `json:"stream,omitempty"`
+}
+
+// CreateResponse is a single streamed status from POST /api/create.
+type CreateResponse struct {
+	Status string `json:"status"`
+}
+
+// Create creates a model. Progress is reported via onStatus.
+func (c *Client) Create(request CreateRequest, onStatus func(CreateResponse) error) error {
+	return c.doStream(c.apiURL("create"), request, func(raw json.RawMessage) error {
+		var res CreateResponse
+		if err := json.Unmarshal(raw, &res); err != nil {
+			return fmt.Errorf("failed to unmarshal create response: %w", err)
+		}
+		return onStatus(res)
+	})
+}
+
+// --- /api/blobs ------------------------------------------------------------
+
+// BlobExists checks whether a blob with the given digest exists on the server.
+func (c *Client) BlobExists(digest string) (bool, error) {
+	url := c.apiURL("blobs/" + digest)
+	req, err := http.NewRequest("HEAD", url, nil)
+	if err != nil {
+		return false, fmt.Errorf("failed to create blob HEAD request: %w", err)
+	}
+	if c.ds.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.ds.Token)
 	}
 
-	var status ProcessStatus
-	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
-		return nil, fmt.Errorf("failed to decode ps response: %w", err)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("failed to send blob HEAD request: %w", err)
 	}
-	return &status, nil
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		return true, nil
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return false, nil
+	}
+	return false, fmt.Errorf("blob HEAD unexpected status: %d", resp.StatusCode)
+}
+
+// BlobCreate uploads a binary blob with the given digest.
+func (c *Client) BlobCreate(digest string, body io.Reader) error {
+	url := c.apiURL("blobs/" + digest)
+	req, err := http.NewRequest("POST", url, body)
+	if err != nil {
+		return fmt.Errorf("failed to create blob POST request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	if c.ds.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.ds.Token)
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send blob POST request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("blob POST failed, status code: %d, body: %s", resp.StatusCode, respBody)
+	}
+	return nil
 }
 
 // Query sends a request to the ollama API
@@ -275,7 +626,9 @@ func (c *Client) Query(request Request) (err error) {
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.ds.Token)
+	if c.ds.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.ds.Token)
+	}
 
 	// Response comes line by line
 	resp, err := c.client.Do(req)

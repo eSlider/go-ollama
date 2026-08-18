@@ -249,16 +249,24 @@ func TestIntegration_Ps(t *testing.T) {
 func TestIntegration_Embed(t *testing.T) {
 	client := integrationClient(t)
 
+	model := os.Getenv("OLLAMA_EMBED_MODEL")
+	if model == "" {
+		model = "llama3.2:1b"
+	}
+
 	resp, err := client.Embed(EmbedRequest{
-		Model: "llama3.2:1b",
+		Model: model,
 		Input: []string{"Hello world"},
 	})
 	if err != nil {
+		if strings.Contains(err.Error(), "not support embeddings") || strings.Contains(err.Error(), "NaN") {
+			t.Skipf("model %s does not support embeddings on this server: %v", model, err)
+		}
 		t.Fatalf("Embed error: %v", err)
 	}
 
-	if resp.Model != "llama3.2:1b" {
-		t.Errorf("model = %q, want llama3.2:1b", resp.Model)
+	if resp.Model != model {
+		t.Errorf("model = %q, want %s", resp.Model, model)
 	}
 	if len(resp.Embeddings) != 1 {
 		t.Fatalf("got %d embeddings, want 1", len(resp.Embeddings))
@@ -291,11 +299,19 @@ func TestIntegration_EmbedBatch(t *testing.T) {
 		"Quantum computing uses qubits",
 	}
 
+	model := os.Getenv("OLLAMA_EMBED_MODEL")
+	if model == "" {
+		model = "llama3.2:1b"
+	}
+
 	resp, err := client.Embed(EmbedRequest{
-		Model: "llama3.2:1b",
+		Model: model,
 		Input: inputs,
 	})
 	if err != nil {
+		if strings.Contains(err.Error(), "not support embeddings") || strings.Contains(err.Error(), "NaN") {
+			t.Skipf("model %s does not support embeddings on this server: %v", model, err)
+		}
 		t.Fatalf("Embed error: %v", err)
 	}
 
@@ -333,4 +349,157 @@ func cosineSimilarity(a, b []float64) float64 {
 		return 0
 	}
 	return dot / (math.Sqrt(normA) * math.Sqrt(normB))
+}
+
+func TestIntegration_Version(t *testing.T) {
+	client := integrationClient(t)
+
+	ver, err := client.Version()
+	if err != nil {
+		t.Fatalf("Version error: %v", err)
+	}
+	t.Logf("Ollama version: %s", ver.Version)
+
+	if ver.Version == "" {
+		t.Error("version is empty")
+	}
+}
+
+func TestIntegration_Tags(t *testing.T) {
+	client := integrationClient(t)
+
+	tags, err := client.Tags()
+	if err != nil {
+		t.Fatalf("Tags error: %v", err)
+	}
+	t.Logf("Available models: %d", len(tags.Models))
+
+	if len(tags.Models) == 0 {
+		t.Fatal("no models available")
+	}
+	for _, m := range tags.Models {
+		if m.Name == "" {
+			t.Error("model name is empty")
+		}
+		t.Logf("  %s  size=%d  family=%s", m.Name, m.Size, m.Details.Family)
+	}
+}
+
+func TestIntegration_Show(t *testing.T) {
+	client := integrationClient(t)
+
+	resp, err := client.Show(ShowRequest{Name: "gemma3:1b"})
+	if err != nil {
+		t.Fatalf("Show error: %v", err)
+	}
+
+	t.Logf("Modelfile length: %d", len(resp.Modelfile))
+	t.Logf("Parameters: %s", resp.Parameters)
+	t.Logf("Details: family=%s params=%s quant=%s",
+		resp.Details.Family, resp.Details.ParameterSize, resp.Details.QuantLevel)
+	t.Logf("ModelInfo keys: %d", len(resp.ModelInfo))
+
+	if resp.Details.Family == "" {
+		t.Error("details.family is empty")
+	}
+	if resp.Details.ParameterSize == "" {
+		t.Error("details.parameter_size is empty")
+	}
+}
+
+func TestIntegration_Chat(t *testing.T) {
+	client := integrationClient(t)
+
+	var tokens []string
+	var finalResp ChatResponse
+
+	err := client.Chat(ChatRequest{
+		Model: "gemma3:1b",
+		Messages: []ChatMessage{
+			{Role: "system", Content: "You are a helpful assistant named TestBot."},
+			{Role: "user", Content: "What is your name? Reply in one sentence."},
+		},
+		Options: &RequestOptions{
+			Temperature: Float(0),
+			NumPredict:  Int(30),
+		},
+	}, func(res ChatResponse) error {
+		if res.Message.Content != "" {
+			tokens = append(tokens, res.Message.Content)
+		}
+		if res.Done {
+			finalResp = res
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Chat error: %v", err)
+	}
+
+	full := strings.Join(tokens, "")
+	t.Logf("Response: %q (%d chunks)", full, len(tokens))
+	t.Logf("Stats: prompt_eval=%d, eval=%d", finalResp.PromptEvalCount, finalResp.EvalCount)
+
+	if full == "" {
+		t.Error("empty response")
+	}
+	if !strings.Contains(strings.ToLower(full), "testbot") {
+		t.Errorf("expected 'TestBot' in response, got: %s", full)
+	}
+	if finalResp.PromptEvalCount == 0 {
+		t.Error("prompt_eval_count is 0")
+	}
+}
+
+func TestIntegration_ChatMultiTurn(t *testing.T) {
+	client := integrationClient(t)
+
+	var full strings.Builder
+
+	err := client.Chat(ChatRequest{
+		Model: "gemma3:1b",
+		Messages: []ChatMessage{
+			{Role: "system", Content: "You have perfect memory. Always recall facts from the conversation."},
+			{Role: "user", Content: "Remember this: my name is Alice."},
+			{Role: "assistant", Content: "Got it! Your name is Alice. I'll remember that."},
+			{Role: "user", Content: "Say my name."},
+		},
+		Options: &RequestOptions{
+			Temperature: Float(0),
+			NumPredict:  Int(30),
+		},
+	}, func(res ChatResponse) error {
+		full.WriteString(res.Message.Content)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Chat error: %v", err)
+	}
+
+	resp := full.String()
+	t.Logf("Response: %q", resp)
+
+	if !strings.Contains(resp, "Alice") {
+		t.Errorf("expected model to recall 'Alice', got: %s", resp)
+	}
+}
+
+func TestIntegration_Copy(t *testing.T) {
+	client := integrationClient(t)
+
+	err := client.Copy(CopyRequest{
+		Source:      "gemma3:1b",
+		Destination: "gemma3:1b-test-copy",
+	})
+	if err != nil {
+		t.Fatalf("Copy error: %v", err)
+	}
+	t.Log("Copy succeeded")
+
+	// Clean up
+	err = client.Delete(DeleteRequest{Name: "gemma3:1b-test-copy"})
+	if err != nil {
+		t.Fatalf("Delete cleanup error: %v", err)
+	}
+	t.Log("Delete cleanup succeeded")
 }

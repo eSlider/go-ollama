@@ -22,25 +22,14 @@ import (
 	ollama "github.com/eslider/go-ollama"
 )
 
-var defaultModels = []string{
+var fallbackModels = []string{
 	"gemma3:1b",
-	//"gemma3:4b",
-	//"gemma3:12b",
-	//"llama3.2:1b",
-	//"llama3.2:3b",
-	//"deepseek-r1:8b",
-	//"deepseek-r1:14b",
-	//"qwen2.5-coder:1.5b",
-	//"kirito1/qwen3-coder:latest",
-	//"gpt-oss:latest",
+	"llama3.2:1b",
+	"deepseek-r1:8b",
 }
 
 // --- Styles ----------------------------------------------------------------
 
-const (
-	hPad = 2
-	vPad = 1
-)
 
 var (
 	titleStyle = lipgloss.NewStyle().
@@ -90,15 +79,21 @@ var (
 
 // --- Tea messages ----------------------------------------------------------
 
-type tokenMsg string
-type doneMsg struct {
-	promptEvalCount int
-	evalCount       int
-}
-type errMsg struct{ err error }
-type psMsg struct {
-	models map[string]ollama.ProcessModel
-}
+type (
+	tokenMsg string
+	doneMsg  struct {
+		promptEvalCount int
+		evalCount       int
+	}
+)
+
+type (
+	errMsg struct{ err error }
+	psMsg  struct {
+		models map[string]ollama.ProcessModel
+	}
+)
+type tagsMsg struct{ models []string }
 
 // --- Screen state ----------------------------------------------------------
 
@@ -181,7 +176,7 @@ func initialModel(client *ollama.Client, prog **tea.Program) model {
 
 	return model{
 		screen:     screenModelSelect,
-		models:     defaultModels,
+		models:     fallbackModels,
 		client:     client,
 		textarea:   ta,
 		sysTA:      sysTA,
@@ -192,7 +187,21 @@ func initialModel(client *ollama.Client, prog **tea.Program) model {
 }
 
 func (m model) Init() tea.Cmd {
-	return m.fetchPs()
+	return tea.Batch(m.fetchTags(), m.fetchPs())
+}
+
+func (m model) fetchTags() tea.Cmd {
+	return func() tea.Msg {
+		tags, err := m.client.Tags()
+		if err != nil || len(tags.Models) == 0 {
+			return tagsMsg{models: nil}
+		}
+		names := make([]string, len(tags.Models))
+		for i, t := range tags.Models {
+			names[i] = t.Name
+		}
+		return tagsMsg{models: names}
+	}
 }
 
 func (m model) fetchPs() tea.Cmd {
@@ -218,6 +227,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		if m.screen == screenChat {
 			m.resizeChat()
+		}
+		return m, nil
+
+	case tagsMsg:
+		if len(msg.models) > 0 {
+			m.models = msg.models
+			if m.cursor >= len(m.models) {
+				m.cursor = 0
+			}
 		}
 		return m, nil
 
@@ -303,11 +321,10 @@ func (m model) updateSystemPrompt(msg tea.Msg) (tea.Model, tea.Cmd) {
 // --- Chat screen -----------------------------------------------------------
 
 func (m model) innerWidth() int {
-	w := m.width - hPad*2
-	if w < 20 {
-		w = 20
+	if m.width < 20 {
+		return 20
 	}
-	return w
+	return m.width
 }
 
 func (m *model) resizeChat() {
@@ -318,7 +335,7 @@ func (m *model) resizeChat() {
 	const statusH = 1
 	taH := m.textarea.Height() + 2
 
-	vpH := m.height - vPad*2 - titleH - gapH - taH - statusH
+	vpH := m.height - titleH - gapH - taH - statusH
 	if vpH < 3 {
 		vpH = 3
 	}
@@ -438,32 +455,9 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-// buildConversationPrompt formats all previous messages into a single prompt
-// so the model has the full conversation context.
-func (m model) buildConversationPrompt() string {
-	var sb strings.Builder
-	for _, entry := range m.history {
-		switch entry.role {
-		case "user":
-			sb.WriteString("User: ")
-			sb.WriteString(entry.text)
-			sb.WriteString("\n\n")
-		case "assistant":
-			if entry.text != "" {
-				sb.WriteString("Assistant: ")
-				sb.WriteString(entry.text)
-				sb.WriteString("\n\n")
-			}
-		}
-	}
-	// The last entry is the empty assistant placeholder — prompt the model to continue.
-	sb.WriteString("Assistant: ")
-	return sb.String()
-}
-
-func (m model) runQuery() {
-	p := *m.prog
-
+// buildChatMessages converts conversation history into ChatMessage slice
+// with a system message prepended.
+func (m model) buildChatMessages() []ollama.ChatMessage {
 	sysParts := []string{
 		fmt.Sprintf("Current time: %s", time.Now().Format("2006-01-02 15:04:05 MST")),
 		fmt.Sprintf("Model: %s", m.selectedModel),
@@ -471,30 +465,41 @@ func (m model) runQuery() {
 	if m.systemPrompt != "" {
 		sysParts = append(sysParts, m.systemPrompt)
 	}
-	sys := ollama.String(strings.Join(sysParts, "\n"))
 
-	fullPrompt := m.buildConversationPrompt()
+	msgs := []ollama.ChatMessage{
+		{Role: "system", Content: strings.Join(sysParts, "\n")},
+	}
+	for _, entry := range m.history {
+		if entry.role == "assistant" && entry.text == "" {
+			continue
+		}
+		msgs = append(msgs, ollama.ChatMessage{
+			Role:    entry.role,
+			Content: entry.text,
+		})
+	}
+	return msgs
+}
+
+func (m model) runQuery() {
+	p := *m.prog
 
 	var finalPromptEval, finalEval int
-	err := m.client.Query(ollama.Request{
-		Model:  m.selectedModel,
-		Prompt: fullPrompt,
-		System: sys,
+	err := m.client.Chat(ollama.ChatRequest{
+		Model:    m.selectedModel,
+		Messages: m.buildChatMessages(),
 		Options: &ollama.RequestOptions{
 			Temperature: ollama.Float(0.7),
 		},
-		OnJson: func(res ollama.Response) error {
-			if res.Response != nil {
-				p.Send(tokenMsg(*res.Response))
-			}
-			if res.PromptEvalCount != nil {
-				finalPromptEval = *res.PromptEvalCount
-			}
-			if res.EvalCount != nil {
-				finalEval = *res.EvalCount
-			}
-			return nil
-		},
+	}, func(res ollama.ChatResponse) error {
+		if res.Message.Content != "" {
+			p.Send(tokenMsg(res.Message.Content))
+		}
+		if res.Done {
+			finalPromptEval = res.PromptEvalCount
+			finalEval = res.EvalCount
+		}
+		return nil
 	})
 	if err != nil {
 		p.Send(errMsg{err: err})
@@ -608,16 +613,11 @@ func (m model) viewModelSelect() string {
 	content := sb.String()
 
 	lines := strings.Count(content, "\n") + 1
-	usedH := lines + vPad*2
-	if remaining := m.height - usedH; remaining > 0 {
+	if remaining := m.height - lines; remaining > 0 {
 		content += strings.Repeat("\n", remaining)
 	}
 
-	return lipgloss.NewStyle().
-		Padding(vPad, hPad).
-		Width(m.width).
-		Height(m.height).
-		Render(content)
+	return content
 }
 
 func (m model) viewSystemPrompt() string {
@@ -635,16 +635,11 @@ func (m model) viewSystemPrompt() string {
 	content := sb.String()
 
 	lines := strings.Count(content, "\n") + 1
-	usedH := lines + vPad*2
-	if remaining := m.height - usedH; remaining > 0 {
+	if remaining := m.height - lines; remaining > 0 {
 		content += strings.Repeat("\n", remaining)
 	}
 
-	return lipgloss.NewStyle().
-		Padding(vPad, hPad).
-		Width(m.width).
-		Height(m.height).
-		Render(content)
+	return content
 }
 
 func (m model) viewChat() string {
@@ -664,11 +659,7 @@ func (m model) viewChat() string {
 
 	sb.WriteString(statusBarStyle.Width(iw).Render(m.statusLine()))
 
-	return lipgloss.NewStyle().
-		Padding(vPad, hPad).
-		Width(m.width).
-		Height(m.height).
-		Render(sb.String())
+	return sb.String()
 }
 
 func (m model) ctxInfo() string {
@@ -736,9 +727,17 @@ func formatBytes(b int64) string {
 // --- Main ------------------------------------------------------------------
 
 func main() {
+	url := os.Getenv("OPEN_WEB_API_GENERATE_URL")
+	token := os.Getenv("OPEN_WEB_API_TOKEN")
+
+	if url == "" {
+		// url = "http://191.168.1.134:11434/api/generate"
+		url = "http://172.17.0.1:11434/api/generate"
+	}
+
 	client := ollama.NewOpenWebUiClient(&ollama.DSN{
-		URL:   os.Getenv("OPEN_WEB_API_GENERATE_URL"),
-		Token: os.Getenv("OPEN_WEB_API_TOKEN"),
+		URL:   url,
+		Token: token,
 	})
 
 	var p *tea.Program
