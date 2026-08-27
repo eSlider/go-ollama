@@ -20,6 +20,7 @@ func TestDSN_resolveAPI(t *testing.T) {
 		{"explicit ollama", DSN{API: APIOllama, URL: "http://x/v1/chat/completions"}, APIOllama},
 		{"detect v1 path", DSN{URL: "http://127.0.0.1:18434/v1"}, APIOpenAI},
 		{"detect chat", DSN{URL: "http://host/v1/chat/completions"}, APIOpenAI},
+		{"detect completions", DSN{URL: "http://127.0.0.1:8102/v1/completions"}, APICompletions},
 		{"default ollama", DSN{URL: DefaultGenerateURL}, APIOllama},
 	}
 	for _, tc := range cases {

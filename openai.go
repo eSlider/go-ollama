@@ -18,6 +18,8 @@ const (
 	APIOllama APIBackend = "ollama"
 	// APIOpenAI is OpenAI-compatible chat completions (llama.cpp server, etc.).
 	APIOpenAI APIBackend = "openai"
+	// APICompletions is OpenAI-compatible /v1/completions (llama.cpp prompt API).
+	APICompletions APIBackend = "completions"
 )
 
 // DefaultOpenAIChatURL is the local llama-server OpenAI chat endpoint.
@@ -29,12 +31,17 @@ func (d *DSN) resolveAPI() APIBackend {
 		return APIOllama
 	}
 	switch APIBackend(strings.ToLower(strings.TrimSpace(string(d.API)))) {
+	case APICompletions:
+		return APICompletions
 	case APIOpenAI:
 		return APIOpenAI
 	case APIOllama:
 		return APIOllama
 	}
 	u := strings.ToLower(d.URL)
+	if strings.Contains(u, "/v1/completions") && !strings.Contains(u, "chat/completions") {
+		return APICompletions
+	}
 	if strings.Contains(u, "/v1/") || strings.HasSuffix(u, "/v1") || strings.Contains(u, "chat/completions") {
 		return APIOpenAI
 	}
@@ -93,6 +100,7 @@ type openAIChatChunk struct {
 			Role    string `json:"role"`
 			Content string `json:"content"`
 		} `json:"message"`
+		Text string `json:"text"`
 	} `json:"choices"`
 }
 
@@ -218,6 +226,9 @@ func (c *Client) handleOpenAIPayload(raw []byte, model *string, request Request,
 	content := ch.Delta.Content
 	if content == "" && ch.Message != nil {
 		content = ch.Message.Content
+	}
+	if content == "" {
+		content = ch.Text
 	}
 	done := ch.FinishReason != ""
 	res := Response{

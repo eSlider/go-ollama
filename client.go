@@ -5,11 +5,13 @@
 package ollama
 
 import (
+	"context"
 	"crypto/tls"
 	base64 "encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"regexp"
 	"strings"
@@ -24,13 +26,19 @@ const DefaultGenerateURL = "http://localhost:11434/api/generate"
 type Client struct {
 	client *http.Client // HTTP client
 	ds     *DSN         // Data source name
+	closer io.Closer    // optional SSH pool
 }
 
 // DSN is a data source name for the ollama API
 type DSN struct {
-	URL   string     // URL of the ollama /api/generate or OpenAI /v1/chat/completions base
+	URL   string     // URL of the ollama /api/generate, OpenAI /v1, or /v1/completions
 	Token string     // Token for the ollama API / Bearer for OpenAI-compatible servers
-	API   APIBackend // ollama | openai; empty = auto-detect from URL (/v1 → openai)
+	API   APIBackend // ollama | openai | completions; empty = auto-detect from URL
+	// SSH is an OpenSSH Host alias (e.g. "naj-mdx-1"). When set, HTTP is dialed
+	// through go-sshlib to the URL host:port on the remote side (ssh -W).
+	SSH string
+	// DialContext overrides TCP dial (tests, custom tunnels). Wins over SSH.
+	DialContext func(ctx context.Context, network, addr string) (net.Conn, error)
 }
 
 // RequestOptions are options for the ollama API
@@ -138,16 +146,30 @@ func NewOpenWebUiClient(dsn *DSN) *Client {
 	if strings.TrimSpace(resolved.URL) == "" {
 		resolved.URL = DefaultGenerateURL
 	}
-	return &Client{
-		// Ignore tls
-		client: &http.Client{
-			Timeout: 0,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			},
-		},
-		ds: &resolved,
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
+	var closer io.Closer
+	if resolved.DialContext != nil {
+		transport.DialContext = resolved.DialContext
+	} else if alias := strings.TrimSpace(resolved.SSH); alias != "" {
+		pool := newSSHPool(alias)
+		transport.DialContext = pool.DialContext
+		closer = pool
+	}
+	return &Client{
+		client: &http.Client{Timeout: 0, Transport: transport},
+		ds:     &resolved,
+		closer: closer,
+	}
+}
+
+// Close releases an SSH tunnel opened via DSN.SSH.
+func (c *Client) Close() error {
+	if c == nil || c.closer == nil {
+		return nil
+	}
+	return c.closer.Close()
 }
 
 // apiURL replaces the last path segment of the DSN URL with the given segment.
@@ -619,7 +641,10 @@ func (c *Client) BlobCreate(digest string, body io.Reader) error {
 
 // Query sends a request to the ollama API or an OpenAI-compatible chat endpoint.
 func (c *Client) Query(request Request) (err error) {
-	if c.ds.resolveAPI() == APIOpenAI {
+	switch c.ds.resolveAPI() {
+	case APICompletions:
+		return c.queryCompletions(request)
+	case APIOpenAI:
 		return c.queryOpenAI(request)
 	}
 	js := request.ToJson()
