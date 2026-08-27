@@ -28,8 +28,9 @@ type Client struct {
 
 // DSN is a data source name for the ollama API
 type DSN struct {
-	URL   string // URL of the ollama API
-	Token string // Token for the ollama API
+	URL   string     // URL of the ollama /api/generate or OpenAI /v1/chat/completions base
+	Token string     // Token for the ollama API / Bearer for OpenAI-compatible servers
+	API   APIBackend // ollama | openai; empty = auto-detect from URL (/v1 → openai)
 }
 
 // RequestOptions are options for the ollama API
@@ -616,8 +617,11 @@ func (c *Client) BlobCreate(digest string, body io.Reader) error {
 	return nil
 }
 
-// Query sends a request to the ollama API
+// Query sends a request to the ollama API or an OpenAI-compatible chat endpoint.
 func (c *Client) Query(request Request) (err error) {
+	if c.ds.resolveAPI() == APIOpenAI {
+		return c.queryOpenAI(request)
+	}
 	js := request.ToJson()
 	req, err := http.NewRequest("POST", c.ds.URL, strings.NewReader(js))
 

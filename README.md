@@ -85,6 +85,19 @@ Open WebUI benefits:
 
 Both backends return the same NDJSON streaming format, so all `OnJson` and `OnCodeBlock` callbacks work identically regardless of which one you connect to.
 
+### OpenAI-compatible (llama.cpp server)
+
+Point `DSN.URL` at a `/v1` base (or set `DSN.API = APIOpenAI`). `Query` posts to `/v1/chat/completions` and maps SSE chunks onto the same `OnJson` / `OnCodeBlock` callbacks:
+
+```go
+client := ollama.NewOpenWebUiClient(&ollama.DSN{
+    URL: "http://127.0.0.1:18434/v1",
+    API: ollama.APIOpenAI, // optional; auto-detected from /v1
+})
+```
+
+See `examples/openai-llama/`.
+
 ## How Streaming Works
 
 Ollama's `/api/generate` endpoint returns a **newline-delimited JSON stream** (NDJSON). Each line is a JSON object containing a fragment of the model's response — typically one or a few tokens at a time:
