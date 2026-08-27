@@ -98,6 +98,36 @@ client := ollama.NewOpenWebUiClient(&ollama.DSN{
 
 See `examples/openai-llama/`.
 
+### Completions + SSH (llama.cpp `/v1/completions`)
+
+Production Gemma on a remote box (OpenSSH Host alias) is reached with `DSN.SSH` — HTTP is dialed through [go-sshlib](https://github.com/blacknon/go-sshlib) to the URL's host:port on the far side (`127.0.0.1:8102` stays the remote loopback):
+
+```go
+client := ollama.NewOpenWebUiClient(&ollama.DSN{
+    URL: "http://127.0.0.1:8102/v1/completions",
+    API: ollama.APICompletions, // or omit; detected from /v1/completions
+    SSH: "naj-mdx-1",           // OpenSSH Host from ~/.ssh/config
+})
+defer client.Close()
+
+err := client.Query(ollama.Request{
+    Prompt: "Die heutige Schicht beginnt um",
+    Stream: ollama.Bool(false),
+    Options: &ollama.RequestOptions{
+        Temperature: ollama.Float(0.7),
+        Stop:        []string{"\n"},
+    },
+    OnJson: func(res ollama.Response) error {
+        if res.Response != nil {
+            fmt.Print(*res.Response)
+        }
+        return nil
+    },
+})
+```
+
+Auth uses `ssh-agent` plus `IdentityFile` from the Host block. See `examples/ssh-completions/`.
+
 ## How Streaming Works
 
 Ollama's `/api/generate` endpoint returns a **newline-delimited JSON stream** (NDJSON). Each line is a JSON object containing a fragment of the model's response — typically one or a few tokens at a time:
